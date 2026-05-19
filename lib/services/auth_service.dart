@@ -4,9 +4,12 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user.dart';
 
 class AuthService {
-  // Scopes required for Google Calendar Sync
+  // On Android the clientId is read automatically from google-services.json.
+  // On Web it must be provided explicitly, otherwise GoogleSignIn fails.
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: '1027245916352-mbq2mi65tp100il5cm3uuoslkhu0luv9.apps.googleusercontent.com', // Web Client ID required for web platform
+    clientId: kIsWeb
+        ? '1027245916352-mbq2mi65tp100il5cm3uuoslkhu0luv9.apps.googleusercontent.com'
+        : null,
     scopes: [
       'email',
       'https://www.googleapis.com/auth/calendar',
