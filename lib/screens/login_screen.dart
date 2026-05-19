@@ -126,13 +126,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: _isLoading ? null : () async {
                           setState(() => _isLoading = true);
                           
-                          final success = await provider.loginWithGoogle();
+                          final error = await provider.loginWithGoogle();
                           
                           if (mounted) {
                             setState(() => _isLoading = false);
-                            if (!success) {
+                            if (error != null) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('⚠️ Google Sign-In failed. Please try again.')),
+                                SnackBar(content: Text('⚠️ Google Sign-In failed: $error')),
                               );
                             }
                           }

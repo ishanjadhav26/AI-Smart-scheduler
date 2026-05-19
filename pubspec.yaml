@@ -18,6 +18,7 @@ dependencies:
   intl: ^0.18.1
   google_sign_in: ^6.2.1
   android_alarm_manager_plus: ^4.0.3
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

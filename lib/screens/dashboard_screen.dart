@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../widgets/meeting_card.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -21,6 +22,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
+
+  @override
+  void initState() {
+    super.initState();
+    _requestPermissions();
+  }
+
+  Future<void> _requestPermissions() async {
+    // Request exact alarms & notifications to ensure background triggers work when the app is closed
+    if (await Permission.scheduleExactAlarm.isDenied) {
+      await Permission.scheduleExactAlarm.request();
+    }
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
+    }
+  }
 
   Future<void> _launchExternal(String urlString) async {
     final uri = Uri.tryParse(urlString);
@@ -128,7 +145,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(width: 6),
                         Flexible(
                           child: Text(
-                            provider.user?.email ?? 'ishan.jadhav@gmail.com',
+                            provider.user?.email ?? 'Not signed in',
                             style: const TextStyle(color: Colors.white70, fontSize: 11),
                             overflow: TextOverflow.ellipsis,
                           ),

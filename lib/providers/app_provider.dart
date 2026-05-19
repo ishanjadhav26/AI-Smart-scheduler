@@ -212,8 +212,8 @@ class AppProvider with ChangeNotifier {
     }
   }
 
-  // Google Sign-In & Firebase Auth simulated production entry
-  Future<bool> loginWithGoogle() async {
+  // Google Sign-In real production entry
+  Future<String?> loginWithGoogle() async {
     final result = await AuthService.signInWithGoogle();
     if (result['success'] == true) {
       _accessToken = result['accessToken'] as String;
@@ -227,9 +227,9 @@ class AppProvider with ChangeNotifier {
       await syncNow(silent: true);
       
       notifyListeners();
-      return true;
+      return null;
     }
-    return false;
+    return result['error'] as String? ?? 'Unknown error occurred during Google Sign-In';
   }
 
   // Manual event creation: timezone-compliant, behaves exactly like Google events

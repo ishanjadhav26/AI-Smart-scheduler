@@ -39,17 +39,10 @@ class AuthService {
         };
       }
     } catch (e) {
-      if (kDebugMode) print("Native Google Sign-In Error (using beautiful simulated fallbacks): $e");
-      
-      // Highly robust production-grade simulated account chooser fallback for dev/emulator environments
-      await Future.delayed(const Duration(milliseconds: 1200));
+      if (kDebugMode) print("Native Google Sign-In Error: $e");
       return {
-        'success': true,
-        'accessToken': 'ya29.mock_token_for_google_calendar_sync_authentication_protocol_${DateTime.now().millisecondsSinceEpoch}',
-        'user': User(
-          email: 'ishanjadhav26@gmail.com',
-          name: 'Ishan Jadhav',
-        ),
+        'success': false,
+        'error': e.toString(),
       };
     }
   }
