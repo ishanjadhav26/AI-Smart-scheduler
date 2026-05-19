@@ -6,6 +6,7 @@ import '../services/api_service.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../services/auth_service.dart';
+import '../services/alarm_service.dart';
 
 class AppProvider with ChangeNotifier {
   User? _user;
@@ -63,6 +64,24 @@ class AppProvider with ChangeNotifier {
       _accessToken = token;
       _tokenExpiry = expiry;
     }
+
+    // Try refreshing sign-in silently to verify credentials on app launch
+    try {
+      final silentResult = await AuthService.signInSilently();
+      if (silentResult != null) {
+        _accessToken = silentResult['accessToken'] as String;
+        _tokenExpiry = DateTime.now().millisecondsSinceEpoch + 3600 * 1000;
+        _user = silentResult['user'] as User;
+        
+        await StorageService.saveOAuthToken(_accessToken, _tokenExpiry);
+        await StorageService.saveUser(_user);
+      }
+    } catch (e) {
+      if (kDebugMode) print("Silent sign-in refresh error: $e");
+    }
+
+    // Schedule exact alarms on app boot to cover closed-state execution
+    await AlarmService.scheduleReminders(_events);
 
     // Start precision 1-second system clock polling loop
     _checkTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -180,6 +199,9 @@ class AppProvider with ChangeNotifier {
       
       await StorageService.saveEvents(_events);
       await StorageService.saveLastSync(_lastSync);
+
+      // Reschedule high-precision background alarms for closed-state triggers
+      await AlarmService.scheduleReminders(_events);
     } catch (e) {
       if (kDebugMode) print("Sync error: $e");
     } finally {
@@ -232,6 +254,9 @@ class AppProvider with ChangeNotifier {
     _events.sort((a, b) => a.startTime.compareTo(b.startTime));
     
     await StorageService.saveEvents(_events);
+    // Schedule high-precision background alarms for this manual event
+    await AlarmService.scheduleReminders(_events);
+
     switchTab('overview');
   }
 
@@ -246,6 +271,10 @@ class AppProvider with ChangeNotifier {
     _events.removeAt(eventIndex);
     await StorageService.saveEvents(_events);
 
+    // Cancel scheduled background alarms for the deleted event
+    await AlarmService.cancelReminder(evId, false);
+    await AlarmService.cancelReminder(evId, true);
+
     // 2. Google calendar delete
     if (targetEvent.source != 'manual' && _accessToken != null) {
       try {
@@ -254,16 +283,23 @@ class AppProvider with ChangeNotifier {
         if (kDebugMode) print("Google Calendar API delete error: $e");
       }
     }
+
+    // Reschedule remaining active events
+    await AlarmService.scheduleReminders(_events);
+
     notifyListeners();
   }
 
   // Schedule a repeating call at -5 minutes
-  void scheduleRepeatCall(String evId) {
+  void scheduleRepeatCall(String evId) async {
     final idx = _events.indexWhere((e) => e.id == evId);
     if (idx != -1) {
       _events[idx].repeatScheduled = true;
       _events[idx].reminded5 = false; // Reset flags to fire on schedule
-      StorageService.saveEvents(_events);
+      await StorageService.saveEvents(_events);
+
+      // Reschedule exact background alarms to pick up the new 5-minute repeating reminder
+      await AlarmService.scheduleReminders(_events);
     }
     _currentCall = null;
     TtsService.stopSpeech();

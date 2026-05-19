@@ -181,7 +181,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     label: 'Google Calendar',
                     isActive: false,
                     onTap: () {
-                      _launchExternal('https://calendar.google.com');
+                      final email = provider.user?.email;
+                      final url = email != null 
+                          ? 'https://calendar.google.com/calendar/u/$email' 
+                          : 'https://calendar.google.com';
+                      _launchExternal(url);
                       Navigator.pop(context); // Close Drawer
                     },
                   ),
@@ -190,7 +194,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     label: 'Gmail',
                     isActive: false,
                     onTap: () {
-                      _launchExternal('https://mail.google.com');
+                      final email = provider.user?.email;
+                      final url = email != null 
+                          ? 'https://mail.google.com/mail/u/$email' 
+                          : 'https://mail.google.com';
+                      _launchExternal(url);
                       Navigator.pop(context); // Close Drawer
                     },
                   ),
