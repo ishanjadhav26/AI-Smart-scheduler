@@ -10,7 +10,6 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _tokenController = TextEditingController();
   bool _isLoading = false;
 
   @override
@@ -61,7 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 440),
+                constraints: const BoxConstraints(maxWidth: 400),
                 padding: const EdgeInsets.all(32.0),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0C0714).withOpacity(0.7), // glass fill
@@ -117,70 +116,34 @@ class _LoginScreenState extends State<LoginScreen> {
                         color: Colors.grey.shade400,
                       ),
                     ),
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 48),
 
-                    // Quick Token Login Field (For instant compilation testing & standard access)
-                    TextField(
-                      controller: _tokenController,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
-                      decoration: InputDecoration(
-                        labelText: 'Google OAuth Access Token',
-                        labelStyle: TextStyle(color: Colors.grey.shade500),
-                        hintText: 'Paste access token or enter "demo"',
-                        hintStyle: TextStyle(color: Colors.grey.shade700, fontSize: 12),
-                        filled: true,
-                        fillColor: Colors.black.withOpacity(0.4),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(
-                            color: Colors.white.withOpacity(0.08),
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: const BorderSide(
-                            color: Color(0xFFA78BFA),
-                          ),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Action Button
+                    // "Sign In with Google" Action Button
                     SizedBox(
                       width: double.infinity,
-                      height: 48,
+                      height: 50,
                       child: ElevatedButton(
                         onPressed: _isLoading ? null : () async {
-                          final text = _tokenController.text.trim();
-                          if (text.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('⚠️ Access token or "demo" is required')),
-                            );
-                            return;
-                          }
-
                           setState(() => _isLoading = true);
                           
-                          if (text.toLowerCase() == 'demo') {
-                            // Seed mock demo session
-                            await provider.login("demo_token", 3600);
-                          } else {
-                            await provider.login(text, 3600);
-                          }
-
+                          final success = await provider.loginWithGoogle();
+                          
                           if (mounted) {
                             setState(() => _isLoading = false);
+                            if (!success) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('⚠️ Google Sign-In failed. Please try again.')),
+                              );
+                            }
                           }
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFA78BFA),
+                          backgroundColor: Colors.white,
                           foregroundColor: Colors.black,
-                          elevation: 8,
-                          shadowColor: const Color(0xFFA78BFA).withOpacity(0.4),
+                          elevation: 4,
+                          shadowColor: Colors.black.withOpacity(0.5),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
                         child: _isLoading
@@ -192,18 +155,27 @@ class _LoginScreenState extends State<LoginScreen> {
                                   color: Colors.black,
                                 ),
                               )
-                            : const Text(
-                                'Sync Calendar & Enter',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  // Google colorful logo representation or clean icon
+                                  const Icon(Icons.g_mobiledata_rounded, size: 28, color: Colors.blue),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Sign in with Google',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                      color: Colors.black.withOpacity(0.85),
+                                    ),
+                                  ),
+                                ],
                               ),
                       ),
                     ),
                     const SizedBox(height: 24),
                     Text(
-                      'Secured via standard Google OAuth v3 api protocol.',
+                      'Secured securely via Firebase & Google Authentication.',
                       style: TextStyle(
                         fontSize: 10,
                         color: Colors.grey.shade600,
@@ -217,11 +189,5 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _tokenController.dispose();
-    super.dispose();
   }
 }

@@ -5,6 +5,7 @@ import '../models/user.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
+import '../services/auth_service.dart';
 
 class AppProvider with ChangeNotifier {
   User? _user;
@@ -189,22 +190,24 @@ class AppProvider with ChangeNotifier {
     }
   }
 
-  // OAuth entry
-  Future<void> login(String oauthToken, int durationSecs) async {
-    _accessToken = oauthToken;
-    _tokenExpiry = DateTime.now().millisecondsSinceEpoch + durationSecs * 1000;
-    
-    await StorageService.saveOAuthToken(_accessToken, _tokenExpiry);
-    
-    try {
-      _user = await ApiService.fetchUserProfile(_accessToken!);
+  // Google Sign-In & Firebase Auth simulated production entry
+  Future<bool> loginWithGoogle() async {
+    final result = await AuthService.signInWithGoogle();
+    if (result['success'] == true) {
+      _accessToken = result['accessToken'] as String;
+      _tokenExpiry = DateTime.now().millisecondsSinceEpoch + 3600 * 1000; // 1 hour session
+      _user = result['user'] as User;
+
+      await StorageService.saveOAuthToken(_accessToken, _tokenExpiry);
       await StorageService.saveUser(_user);
       
-      await syncNow();
-    } catch (e) {
-      if (kDebugMode) print("Login profile error: $e");
+      // Attempt background calendar sync now
+      await syncNow(silent: true);
+      
+      notifyListeners();
+      return true;
     }
-    notifyListeners();
+    return false;
   }
 
   // Manual event creation: timezone-compliant, behaves exactly like Google events
@@ -297,6 +300,7 @@ class AppProvider with ChangeNotifier {
 
   // Sign out cleanly
   Future<void> signOut() async {
+    await AuthService.signOut();
     await unsyncCalendar();
   }
 
