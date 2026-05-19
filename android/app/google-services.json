@@ -37,6 +37,13 @@
             {
               "client_id": "1027245916352-mbq2mi65tp100il5cm3uuoslkhu0luv9.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "1027245916352-ue1af4afu47un8qgbcditbk1m758a2ah.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.smartReminderApp"
+              }
             }
           ]
         }
