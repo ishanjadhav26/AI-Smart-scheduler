@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import '../models/event.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
@@ -7,8 +8,9 @@ import '../services/storage_service.dart';
 import '../services/tts_service.dart';
 import '../services/auth_service.dart';
 import '../services/alarm_service.dart';
+import '../services/native_alarm_bridge.dart';
 
-class AppProvider with ChangeNotifier {
+class AppProvider with ChangeNotifier, WidgetsBindingObserver {
   User? _user;
   String? _accessToken;
   int? _tokenExpiry;
@@ -51,6 +53,8 @@ class AppProvider with ChangeNotifier {
 
   // Boot startup loading state
   Future<void> init() async {
+    WidgetsBinding.instance.addObserver(this);
+    
     _focusMode = StorageService.loadFocusMode();
     _lastSync = StorageService.loadLastSync();
     _events = StorageService.loadEvents();
@@ -108,6 +112,27 @@ class AppProvider with ChangeNotifier {
     await _restorePendingCallFromNotification();
 
     notifyListeners();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _onAppResumed();
+    }
+  }
+
+  Future<void> _onAppResumed() async {
+    await StorageService.reload();
+    await _restorePendingCallFromNotification();
+
+    if (_currentCall != null) {
+      if (StorageService.isCallDeclined(_currentCall!.id, _isRepeatCall)) {
+        TtsService.stopSpeech();
+        _currentCall = null;
+        StorageService.clearPendingCall();
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> _restorePendingCallFromNotification() async {
@@ -200,6 +225,7 @@ class AppProvider with ChangeNotifier {
     TtsService.stopSpeech();
     if (_currentCall != null) {
       StorageService.saveCallAcknowledged(_currentCall!.id, _isRepeatCall);
+      NativeAlarmBridge.cancelReminder(_currentCall!.id, _isRepeatCall);
     }
     _currentCall = null;
     StorageService.clearPendingCall();

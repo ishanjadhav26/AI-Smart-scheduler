@@ -3,6 +3,7 @@ package com.example.smart_reminder_app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 
 class ReminderAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -18,6 +19,13 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         }
 
         NotificationHelper.showReminderNotification(context, eventId, title, timeText, isRepeat)
+        val serviceIntent = Intent(context, ReminderForegroundService::class.java).apply {
+            putExtra("eventId", eventId)
+            putExtra("title", title)
+            putExtra("timeText", timeText)
+            putExtra("isRepeat", isRepeat)
+        }
+        ContextCompat.startForegroundService(context, serviceIntent)
 
         val activityIntent = Intent(context, ReminderActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP

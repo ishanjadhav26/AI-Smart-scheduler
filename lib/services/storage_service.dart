@@ -11,6 +11,10 @@ class StorageService {
     _prefs = await SharedPreferences.getInstance();
   }
 
+  static Future<void> reload() async {
+    await _prefs.reload();
+  }
+
   // Save cached events
   static Future<void> saveEvents(List<Event> events) async {
     final data = events.map((e) => e.toJson()).toList();
@@ -118,6 +122,9 @@ class StorageService {
   static String _ackKey(String eventId, bool isRepeat) =>
       'sra_call_ack_${isRepeat ? 'r' : 'n'}_$eventId';
 
+  static String _declinedKey(String eventId, bool isRepeat) =>
+      'sra_call_declined_${isRepeat ? 'r' : 'n'}_$eventId';
+
   static Future<void> saveCallAcknowledged(String eventId, bool isRepeat) async {
     await _prefs.setBool(_ackKey(eventId, isRepeat), true);
   }
@@ -126,7 +133,12 @@ class StorageService {
     return _prefs.getBool(_ackKey(eventId, isRepeat)) ?? false;
   }
 
+  static bool isCallDeclined(String eventId, bool isRepeat) {
+    return _prefs.getBool(_declinedKey(eventId, isRepeat)) ?? false;
+  }
+
   static Future<void> clearCallAcknowledged(String eventId, bool isRepeat) async {
     await _prefs.remove(_ackKey(eventId, isRepeat));
+    await _prefs.remove(_declinedKey(eventId, isRepeat));
   }
 }

@@ -106,11 +106,26 @@ object NativeReminderScheduler {
     fun markAcknowledged(context: Context, eventId: String, isRepeat: Boolean) {
         val prefs = context.getSharedPreferences("smart_reminder_native", Context.MODE_PRIVATE)
         prefs.edit().putBoolean(ackKey(eventId, isRepeat), true).apply()
+
+        // Also write to FlutterSharedPreferences so the active Flutter UI can sync state
+        val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val flutterKey = "flutter.sra_call_ack_${if (isRepeat) "r" else "n"}_$eventId"
+        flutterPrefs.edit().putBoolean(flutterKey, true).apply()
+    }
+
+    fun markDeclined(context: Context, eventId: String, isRepeat: Boolean) {
+        val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val flutterKey = "flutter.sra_call_declined_${if (isRepeat) "r" else "n"}_$eventId"
+        flutterPrefs.edit().putBoolean(flutterKey, true).apply()
     }
 
     fun clearAcknowledged(context: Context, eventId: String, isRepeat: Boolean) {
         val prefs = context.getSharedPreferences("smart_reminder_native", Context.MODE_PRIVATE)
         prefs.edit().remove(ackKey(eventId, isRepeat)).apply()
+
+        val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val flutterKey = "flutter.sra_call_ack_${if (isRepeat) "r" else "n"}_$eventId"
+        flutterPrefs.edit().remove(flutterKey).apply()
     }
 
     private fun ackKey(eventId: String, isRepeat: Boolean): String {

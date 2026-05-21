@@ -12,6 +12,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
         NativeReminderScheduler.markAcknowledged(context, eventId, isRepeat)
         NotificationHelper.cancelNotification(context, eventId, isRepeat)
         ReminderActivity.stopRingtone()
+        context.stopService(Intent(context, ReminderForegroundService::class.java))
 
         if (intent.action == "com.example.smart_reminder_app.ACCEPT") {
             writeFlutterPendingCall(context, intent)
@@ -19,6 +20,8 @@ class ReminderActionReceiver : BroadcastReceiver() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             context.startActivity(launchIntent)
+        } else {
+            NativeReminderScheduler.markDeclined(context, eventId, isRepeat)
         }
     }
 

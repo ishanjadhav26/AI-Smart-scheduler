@@ -124,18 +124,9 @@ Future<void> alarmTopLevelCallback(int id) async {
       showBadge: true,
       enableLights: true,
     );
-    await notificationsPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(alarmChannel);
-
-    await notificationsPlugin.show(
-      id,
-      'Incoming Meeting Call',
-      bodyText,
-      notifDetails,
-      payload: '${targetEvent.id}|${isRepeat ? '1' : '0'}',
-    );
+    // We skip FlutterLocalNotificationsPlugin.show() because the Native Android Foreground Service
+    // already handles the aggressive Ringtone + Lock Screen Notification UI. We only use this Dart
+    // callback to run the TTS engine in the background.
 
     if (stage < 2 && !StorageService.isCallAcknowledged(targetEvent.id, isRepeat)) {
       final nextStage = stage + 1;

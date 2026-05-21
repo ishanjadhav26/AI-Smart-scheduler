@@ -101,6 +101,8 @@ class ReminderActivity : AppCompatActivity() {
                 .putBoolean("flutter.sra_pending_call_is_repeat", isRepeat)
                 .apply()
             startActivity(intentForMain())
+        } else {
+            NativeReminderScheduler.markDeclined(this, eventId, isRepeat)
         }
         finish()
     }
