@@ -48,7 +48,29 @@ Future<void> _initNotifications() async {
   const InitializationSettings initSettings =
       InitializationSettings(android: androidSettings);
 
-  await plugin.initialize(initSettings);
+  await plugin.initialize(
+    initSettings,
+    onDidReceiveNotificationResponse: (NotificationResponse response) async {
+      final payload = response.payload ?? '';
+      final parts = payload.split('|');
+      final eventId = parts.isNotEmpty ? parts.first : '';
+      final isRepeat = parts.length > 1 ? parts[1] == '1' : false;
+
+      if (response.actionId == 'decline_call') {
+        TtsService.stopSpeech();
+        if (eventId.isNotEmpty) {
+          await StorageService.saveCallAcknowledged(eventId, isRepeat);
+        }
+        await StorageService.clearPendingCall();
+        return;
+      }
+
+      if (eventId.isNotEmpty) {
+        await StorageService.saveCallAcknowledged(eventId, isRepeat);
+        await StorageService.savePendingCall(eventId, isRepeat);
+      }
+    },
+  );
 
   // Create the high-importance channel for meeting alarms
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -59,6 +81,7 @@ Future<void> _initNotifications() async {
     playSound: true,
     enableVibration: true,
     showBadge: true,
+    enableLights: true,
   );
 
   await plugin

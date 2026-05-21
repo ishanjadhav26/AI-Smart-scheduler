@@ -4,148 +4,246 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../models/event.dart';
 import '../services/storage_service.dart';
+import '../services/api_service.dart';
+import '../services/auth_service.dart';
+import '../services/native_alarm_bridge.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TOP-LEVEL background callback — required by android_alarm_manager_plus
-// Must NOT be inside any class. This runs in a separate isolate even when
-// the app is completely swiped away from recent apps.
-// ─────────────────────────────────────────────────────────────────────────────
+@pragma('vm:entry-point')
+Future<void> syncTaskCallback() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await StorageService.init();
+
+    final authResult = await AuthService.signInSilently();
+    String? token;
+
+    if (authResult != null) {
+      token = authResult['accessToken'] as String?;
+      final user = authResult['user'];
+      await StorageService.saveOAuthToken(
+        token,
+        DateTime.now().millisecondsSinceEpoch + 3600 * 1000,
+      );
+      if (user != null) {
+        await StorageService.saveUser(user);
+      }
+    } else {
+      token = StorageService.loadAccessToken();
+    }
+
+    if (token != null) {
+      final events = await ApiService.fetchEvents(token);
+      await StorageService.saveEvents(events);
+      await StorageService.saveLastSync(DateTime.now());
+      await AlarmService.scheduleReminders(events);
+      debugPrint('Background auto-sync successful.');
+    }
+  } catch (e) {
+    debugPrint('Background auto-sync failed: $e');
+  }
+}
+
 @pragma('vm:entry-point')
 Future<void> alarmTopLevelCallback(int id) async {
-  // Step 1: Initialize Flutter bindings in this background isolate
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    // Step 2: Initialize SharedPreferences storage
     await StorageService.init();
 
-    // Step 3: Respect Focus Mode (user-set mute preference)
     if (StorageService.loadFocusMode()) return;
 
-    // Step 4: Load saved events from disk
-    final List<Event> events = StorageService.loadEvents();
+    final events = StorageService.loadEvents();
     if (events.isEmpty) return;
 
-    // Step 5: Find the event that this alarm corresponds to
-    final bool isRepeat = (id & 0x40000000) != 0;
+    final isRepeat = AlarmService.isRepeatFromAlarmId(id);
+    final stage = AlarmService.stageFromAlarmId(id);
+
     Event? targetEvent;
-    for (var ev in events) {
-      if (AlarmService.computeAlarmId(ev.id, isRepeat) == id) {
+    for (final ev in events) {
+      if (AlarmService.computeAlarmId(ev.id, isRepeat, stage: 0) ==
+          AlarmService.primaryAlarmId(id)) {
         targetEvent = ev;
         break;
       }
     }
 
     if (targetEvent == null) return;
+    if (StorageService.isCallAcknowledged(targetEvent.id, isRepeat)) return;
 
-    final String title = targetEvent.title;
-    final String timeStr =
-        "${targetEvent.startTime.hour.toString().padLeft(2, '0')}:${targetEvent.startTime.minute.toString().padLeft(2, '0')}";
-    final String bodyText = isRepeat
-        ? "⏰ 5 MINUTES: $title starts at $timeStr. Join NOW!"
-        : "⏰ 30 MINUTES: $title starts at $timeStr. Get ready!";
+    final title = targetEvent.title;
+    final timeStr =
+        '${targetEvent.startTime.hour.toString().padLeft(2, '0')}:${targetEvent.startTime.minute.toString().padLeft(2, '0')}';
+    final bodyText = isRepeat
+        ? '5 MINUTES: $title starts at $timeStr. Join now.'
+        : '30 MINUTES: $title starts at $timeStr. Get ready.';
 
-    // Step 6: Show high-priority heads-up notification (works 100% when app is closed)
-    final FlutterLocalNotificationsPlugin notificationsPlugin =
-        FlutterLocalNotificationsPlugin();
+    final notificationsPlugin = FlutterLocalNotificationsPlugin();
 
-    const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initSettings =
-        InitializationSettings(android: androidSettings);
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidSettings);
     await notificationsPlugin.initialize(initSettings);
 
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'smart_reminder_alarms',        // channel ID
-      'Meeting Reminders',             // channel name
+    const androidDetails = AndroidNotificationDetails(
+      'smart_reminder_alarms',
+      'Meeting Reminders',
       channelDescription: 'High-priority meeting reminder calls',
       importance: Importance.max,
       priority: Priority.max,
       playSound: true,
       enableVibration: true,
-      fullScreenIntent: true,         // Shows over lock screen like an alarm
-      category: AndroidNotificationCategory.alarm,
+      fullScreenIntent: true,
+      category: AndroidNotificationCategory.call,
       visibility: NotificationVisibility.public,
+      ongoing: true,
+      audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
+      styleInformation: BigTextStyleInformation(''),
+      actions: <AndroidNotificationAction>[
+        AndroidNotificationAction(
+          'accept_call',
+          'Accept',
+          showsUserInterface: true,
+          cancelNotification: true,
+        ),
+        AndroidNotificationAction(
+          'decline_call',
+          'Decline',
+          cancelNotification: true,
+        ),
+      ],
     );
 
-    const NotificationDetails notifDetails =
-        NotificationDetails(android: androidDetails);
+    const notifDetails = NotificationDetails(android: androidDetails);
+
+    const alarmChannel = AndroidNotificationChannel(
+      'smart_reminder_alarms',
+      'Meeting Reminders',
+      description: 'High-priority meeting reminder calls',
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+      showBadge: true,
+      enableLights: true,
+    );
+    await notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(alarmChannel);
 
     await notificationsPlugin.show(
       id,
-      '📅 Meeting Reminder',
+      'Incoming Meeting Call',
       bodyText,
       notifDetails,
+      payload: '${targetEvent.id}|${isRepeat ? '1' : '0'}',
     );
 
-    // Step 7: Also speak via TTS (works when screen is on and audio available)
+    if (stage < 2 && !StorageService.isCallAcknowledged(targetEvent.id, isRepeat)) {
+      final nextStage = stage + 1;
+      final retryId = AlarmService.computeAlarmId(
+        targetEvent.id,
+        isRepeat,
+        stage: nextStage,
+      );
+      await AndroidAlarmManager.cancel(retryId);
+      await AndroidAlarmManager.oneShot(
+        const Duration(seconds: 20),
+        retryId,
+        alarmTopLevelCallback,
+        exact: true,
+        wakeup: true,
+        allowWhileIdle: true,
+      );
+    }
+
     try {
-      final FlutterTts tts = FlutterTts();
-      await tts.setLanguage("en-US");
+      final tts = FlutterTts();
+      await tts.setLanguage('en-US');
       await tts.setSpeechRate(0.45);
       await tts.setVolume(1.0);
       await tts.setPitch(0.85);
-      final alertText = "Meeting reminder. $title starts at $timeStr";
-      await tts.speak(alertText);
-      // Speak twice with a gap
-      await Future.delayed(const Duration(seconds: 5));
-      await tts.speak(alertText);
+      await tts.speak('Meeting reminder. $title starts at $timeStr');
     } catch (ttsError) {
-      debugPrint("TTS in background failed (notification shown instead): $ttsError");
+      debugPrint('TTS in background failed: $ttsError');
     }
   } catch (e) {
-    debugPrint("Background alarm callback error: $e");
+    debugPrint('Background alarm callback error: $e');
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AlarmService — manages scheduling and cancellation of exact background alarms
-// ─────────────────────────────────────────────────────────────────────────────
 class AlarmService {
-  // Initialize the alarm manager
+  static const int _repeatBit = 0x40000000;
+  static const int _stageMask = 0x0C000000;
+  static const int _stageShift = 26;
+  static const int _baseMask = 0x03FFFFFF;
+
   static Future<void> init() async {
     try {
       await AndroidAlarmManager.initialize();
+      await scheduleBackgroundSync();
     } catch (e) {
-      debugPrint("AlarmService init error (non-Android?): $e");
+      debugPrint('AlarmService init error (non-Android?): $e');
     }
   }
 
-  /// Schedule exact background alarms for all upcoming events.
-  /// Call this after every: login, sync, add event, delete event, repeat set.
+  static Future<void> scheduleBackgroundSync() async {
+    try {
+      await AndroidAlarmManager.periodic(
+        const Duration(minutes: 15),
+        999,
+        syncTaskCallback,
+        exact: false,
+        wakeup: true,
+        rescheduleOnReboot: true,
+      );
+      debugPrint('Scheduled background auto-sync every 15 mins.');
+    } catch (e) {
+      debugPrint('Failed to schedule background sync: $e');
+    }
+  }
+
   static Future<void> scheduleReminders(List<Event> events) async {
     try {
       final now = DateTime.now();
-      for (var ev in events) {
+      for (final ev in events) {
         if (ev.startTime.isBefore(now)) continue;
 
-        // ── 30-minute reminder ──
+        await StorageService.clearCallAcknowledged(ev.id, false);
         final trigger30 = ev.startTime.subtract(const Duration(minutes: 30));
         if (trigger30.isAfter(now)) {
-          final int alarmId = computeAlarmId(ev.id, false);
+          final alarmId = computeAlarmId(ev.id, false, stage: 0);
+          try {
+            await NativeAlarmBridge.scheduleReminder(ev, false, trigger30);
+          } catch (_) {}
           await AndroidAlarmManager.cancel(alarmId);
+          await AndroidAlarmManager.cancel(computeAlarmId(ev.id, false, stage: 1));
+          await AndroidAlarmManager.cancel(computeAlarmId(ev.id, false, stage: 2));
           await AndroidAlarmManager.oneShotAt(
             trigger30,
             alarmId,
-            alarmTopLevelCallback,   // ← top-level function
+            alarmTopLevelCallback,
             exact: true,
             wakeup: true,
             rescheduleOnReboot: true,
-            allowWhileIdle: true,    // fires even in Doze mode
+            allowWhileIdle: true,
           );
           debugPrint("Scheduled 30-min alarm for '${ev.title}' at $trigger30 (id=$alarmId)");
         }
 
-        // ── 5-minute repeat reminder (if user requested repeat call) ──
         if (ev.repeatScheduled) {
+          await StorageService.clearCallAcknowledged(ev.id, true);
           final trigger5 = ev.startTime.subtract(const Duration(minutes: 5));
           if (trigger5.isAfter(now)) {
-            final int alarmId = computeAlarmId(ev.id, true);
+            final alarmId = computeAlarmId(ev.id, true, stage: 0);
+            try {
+              await NativeAlarmBridge.scheduleReminder(ev, true, trigger5);
+            } catch (_) {}
             await AndroidAlarmManager.cancel(alarmId);
+            await AndroidAlarmManager.cancel(computeAlarmId(ev.id, true, stage: 1));
+            await AndroidAlarmManager.cancel(computeAlarmId(ev.id, true, stage: 2));
             await AndroidAlarmManager.oneShotAt(
               trigger5,
               alarmId,
-              alarmTopLevelCallback,  // ← top-level function
+              alarmTopLevelCallback,
               exact: true,
               wakeup: true,
               rescheduleOnReboot: true,
@@ -156,23 +254,39 @@ class AlarmService {
         }
       }
     } catch (e) {
-      debugPrint("Failed to schedule reminders: $e");
+      debugPrint('Failed to schedule reminders: $e');
     }
   }
 
-  /// Cancel both alarms for a specific event
   static Future<void> cancelReminder(String eventId, bool isRepeat) async {
     try {
-      await AndroidAlarmManager.cancel(computeAlarmId(eventId, isRepeat));
+      try {
+        await NativeAlarmBridge.cancelReminder(eventId, isRepeat);
+      } catch (_) {}
+      await AndroidAlarmManager.cancel(computeAlarmId(eventId, isRepeat, stage: 0));
+      await AndroidAlarmManager.cancel(computeAlarmId(eventId, isRepeat, stage: 1));
+      await AndroidAlarmManager.cancel(computeAlarmId(eventId, isRepeat, stage: 2));
+      await StorageService.clearCallAcknowledged(eventId, isRepeat);
     } catch (e) {
-      debugPrint("Failed to cancel alarm: $e");
+      debugPrint('Failed to cancel alarm: $e');
     }
   }
 
-  /// Deterministically converts a string event ID into a unique positive int alarm ID.
-  /// Repeat alarms use a different bit pattern so they never clash with 30-min alarms.
-  static int computeAlarmId(String eventId, bool isRepeat) {
-    final int base = eventId.hashCode & 0x3FFFFFFF;
-    return isRepeat ? (base | 0x40000000) : base;
+  static int computeAlarmId(String eventId, bool isRepeat, {int stage = 0}) {
+    int hash = 0x811C9DC5;
+    for (final unit in eventId.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0x7FFFFFFF;
+    }
+    final base = hash & _baseMask;
+    final normalizedStage = stage.clamp(0, 2).toInt();
+    final stageBits = normalizedStage << _stageShift;
+    return base | stageBits | (isRepeat ? _repeatBit : 0);
   }
+
+  static bool isRepeatFromAlarmId(int id) => (id & _repeatBit) != 0;
+
+  static int stageFromAlarmId(int id) => (id & _stageMask) >> _stageShift;
+
+  static int primaryAlarmId(int id) => id & ~_stageMask;
 }

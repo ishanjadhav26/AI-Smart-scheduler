@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/app_provider.dart';
 import '../widgets/meeting_card.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../services/native_alarm_bridge.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -36,6 +37,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     if (await Permission.notification.isDenied) {
       await Permission.notification.request();
+    }
+    if (await Permission.calendar.isDenied) {
+      await Permission.calendar.request();
+    }
+    if (await Permission.calendar.isGranted) {
+      try {
+        await NativeAlarmBridge.startCalendarWatcher();
+      } catch (_) {}
     }
   }
 

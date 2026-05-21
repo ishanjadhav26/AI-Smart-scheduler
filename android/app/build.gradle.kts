@@ -70,4 +70,6 @@ flutter {
 dependencies {
     // Required for flutter_local_notifications Java 8+ API backport
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

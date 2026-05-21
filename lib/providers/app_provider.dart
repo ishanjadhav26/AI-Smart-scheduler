@@ -80,25 +80,53 @@ class AppProvider with ChangeNotifier {
       if (kDebugMode) print("Silent sign-in refresh error: $e");
     }
 
-    // Schedule exact alarms on app boot to cover closed-state execution
+    // Pull fresh meetings on startup so UI and alarm schedules are current
+    // without requiring manual "Sync Now".
+    if (_accessToken != null) {
+      await syncNow(silent: true);
+    }
+
+    // Reschedule exact alarms on app boot to cover closed-state execution
     await AlarmService.scheduleReminders(_events);
+    // Ensure background sync is also scheduled
+    await AlarmService.scheduleBackgroundSync();
 
     // Start precision 1-second system clock polling loop
     _checkTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       _checkReminders();
     });
 
-    // Start auto sync background interval (30 minutes)
-    _autoSyncTimer = Timer.periodic(const Duration(minutes: 30), (timer) {
+    // Run an immediate check on boot
+    _checkReminders();
+
+    // Keep UI list fresh while app is running.
+    _autoSyncTimer = Timer.periodic(const Duration(minutes: 2), (timer) {
       syncNow(silent: true);
     });
+
+    // Restore pending reminder action when app is opened from notification.
+    await _restorePendingCallFromNotification();
 
     notifyListeners();
   }
 
+  Future<void> _restorePendingCallFromNotification() async {
+    final pending = StorageService.loadPendingCall();
+    if (pending == null) return;
+    final eventId = pending['eventId'] as String?;
+    final isRepeat = (pending['isRepeat'] as bool?) ?? false;
+    if (eventId == null || eventId.isEmpty) return;
+
+    final idx = _events.indexWhere((e) => e.id == eventId);
+    if (idx == -1) return;
+
+    triggerCall(_events[idx], isRepeat);
+    await StorageService.clearPendingCall();
+  }
+
   // HIGH-ACCURACY SYSTEM CLOCK POLLED SCHEDULER (second-level precision, max 1s delay)
   void _checkReminders() {
-    if (_focusMode || _events.isEmpty) return;
+    if (_focusMode || _events.isEmpty || _currentCall != null) return;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     bool hasChanges = false;
@@ -108,6 +136,7 @@ class AppProvider with ChangeNotifier {
     // Trigger constants
     const int trigger30Ms = 30 * 60 * 1000;
     const int trigger5Ms = 5 * 60 * 1000;
+    const int windowMs = 60 * 1000; // 1-minute window to catch triggers
 
     for (var ev in _events) {
       final eventMs = ev.startTime.millisecondsSinceEpoch;
@@ -115,23 +144,21 @@ class AppProvider with ChangeNotifier {
       final target5Ms = eventMs - trigger5Ms;
 
       // 1. TRIGGER CONDITION 30-min call reminder
-      if (!ev.reminded30 && nowMs >= target30Ms && nowMs < eventMs) {
+      if (!ev.reminded30 && nowMs >= target30Ms && nowMs < (target30Ms + windowMs)) {
         ev.reminded30 = true;
         hasChanges = true;
-        if (pendingCall == null) {
-          pendingCall = ev;
-          repeatType = false;
-        }
+        pendingCall = ev;
+        repeatType = false;
+        break;
       }
 
       // 2. TRIGGER CONDITION 5-min repeat reminder
-      if (ev.repeatScheduled && !ev.reminded5 && nowMs >= target5Ms && nowMs < eventMs) {
+      if (ev.repeatScheduled && !ev.reminded5 && nowMs >= target5Ms && nowMs < (target5Ms + windowMs)) {
         ev.reminded5 = true;
         hasChanges = true;
-        if (pendingCall == null) {
-          pendingCall = ev;
-          repeatType = true;
-        }
+        pendingCall = ev;
+        repeatType = true;
+        break;
       }
     }
 
@@ -159,15 +186,23 @@ class AppProvider with ChangeNotifier {
   // Accept incoming call
   void acceptCall() {
     TtsService.stopSpeech();
+    if (_currentCall != null) {
+      StorageService.saveCallAcknowledged(_currentCall!.id, _isRepeatCall);
+    }
     // Simply announce accepted and close overlay
     _currentCall = null;
+    StorageService.clearPendingCall();
     notifyListeners();
   }
 
   // Decline/Dismiss incoming call
   void declineCall() {
     TtsService.stopSpeech();
+    if (_currentCall != null) {
+      StorageService.saveCallAcknowledged(_currentCall!.id, _isRepeatCall);
+    }
     _currentCall = null;
+    StorageService.clearPendingCall();
     notifyListeners();
   }
 
@@ -191,6 +226,8 @@ class AppProvider with ChangeNotifier {
     }
 
     try {
+      final previousEventsJson = _events.map((e) => e.toJson()).toList();
+      final previousEventsSnapshot = previousEventsJson.toString();
       final googleEvents = await ApiService.fetchEvents(_accessToken!);
       
       // Upsert into state preserving local properties
@@ -202,6 +239,16 @@ class AppProvider with ChangeNotifier {
 
       // Reschedule high-precision background alarms for closed-state triggers
       await AlarmService.scheduleReminders(_events);
+
+      final updatedEventsJson = _events.map((e) => e.toJson()).toList();
+      final updatedEventsSnapshot = updatedEventsJson.toString();
+      final hasEventChanges = updatedEventsSnapshot != previousEventsSnapshot;
+
+      // Silent sync previously never refreshed UI, forcing manual refresh.
+      // Notify if data changed so meetings appear automatically.
+      if (silent && (hasEventChanges || _lastSync != null)) {
+        notifyListeners();
+      }
     } catch (e) {
       if (kDebugMode) print("Sync error: $e");
     } finally {

@@ -96,4 +96,37 @@ class StorageService {
   static Future<void> clearAll() async {
     await _prefs.clear();
   }
+
+  // Pending reminder call state from notification actions/taps.
+  static Future<void> savePendingCall(String eventId, bool isRepeat) async {
+    await _prefs.setString('sra_pending_call_event_id', eventId);
+    await _prefs.setBool('sra_pending_call_is_repeat', isRepeat);
+  }
+
+  static Map<String, dynamic>? loadPendingCall() {
+    final eventId = _prefs.getString('sra_pending_call_event_id');
+    if (eventId == null || eventId.isEmpty) return null;
+    final isRepeat = _prefs.getBool('sra_pending_call_is_repeat') ?? false;
+    return {'eventId': eventId, 'isRepeat': isRepeat};
+  }
+
+  static Future<void> clearPendingCall() async {
+    await _prefs.remove('sra_pending_call_event_id');
+    await _prefs.remove('sra_pending_call_is_repeat');
+  }
+
+  static String _ackKey(String eventId, bool isRepeat) =>
+      'sra_call_ack_${isRepeat ? 'r' : 'n'}_$eventId';
+
+  static Future<void> saveCallAcknowledged(String eventId, bool isRepeat) async {
+    await _prefs.setBool(_ackKey(eventId, isRepeat), true);
+  }
+
+  static bool isCallAcknowledged(String eventId, bool isRepeat) {
+    return _prefs.getBool(_ackKey(eventId, isRepeat)) ?? false;
+  }
+
+  static Future<void> clearCallAcknowledged(String eventId, bool isRepeat) async {
+    await _prefs.remove(_ackKey(eventId, isRepeat));
+  }
 }
